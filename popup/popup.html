@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🛡️ Privacy Guardian</h1>
+      <p class="tagline">AI-Powered Protection</p>
+    </header>
+
+    <div class="status-card">
+      <div class="status-indicator" id="statusIndicator">
+        <span class="status-dot active"></span>
+        <span id="statusText">Protection Active</span>
+      </div>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="detectionCount">0</div>
+        <div class="stat-label">Detections Today</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="blockedCount">0</div>
+        <div class="stat-label">Items Blocked</div>
+      </div>
+    </div>
+
+    <div class="risk-info">
+      <h3>Website Risk Assessment</h3>
+      <div id="riskScore" style="font-weight:bold; font-size:16px; margin-bottom:8px;">Loading risk...</div>
+      <div id="riskReasons" style="font-size:14px; color:#555;"></div>
+    </div>
+
+    <div class="controls">
+      <button id="toggleBtn" class="btn btn-primary">Disable Protection</button>
+      <button id="settingsBtn" class="btn btn-secondary">Settings</button>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
