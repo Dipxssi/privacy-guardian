@@ -64,18 +64,27 @@ async function checkRiskForCurrentPage() {
   const url = window.location.href;
 
   try {
-    const response = await fetch("http://localhost:9000/check_website_risk", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url }),
-    });
-
-    lastRiskData = await response.json();
-    displayInlineRisk(lastRiskData);
+    // Send message to background script to make API call
+    chrome.runtime.sendMessage(
+      { action: 'checkWebsiteRisk', url: url },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error("Error communicating with background script:", chrome.runtime.lastError);
+          clearInlineRiskIndicators();
+          return;
+        }
+        
+        if (response && response.success) {
+          lastRiskData = response.data;
+          displayInlineRisk(lastRiskData);
+        } else {
+          console.error("Failed to fetch risk info:", response?.error || "Unknown error");
+          clearInlineRiskIndicators();
+        }
+      }
+    );
   } catch (e) {
-    console.error("Failed to fetch risk info", e);
+    console.error("Failed to check risk:", e);
     clearInlineRiskIndicators();
   }
 }
@@ -139,6 +148,98 @@ inputObserver.observe(document.body, { childList: true, subtree: true });
 
 scanAndAttachAllInputs();
 
-// Your PII detection function unchanged...
+// PII Detection Function
+async function checkForPII(text, element) {
+  if (!text || text.length < 3) return;
+
+  const detectedTypes = [];
+  let warningMessage = '';
+
+  // Email pattern
+  const emailPattern = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g;
+  if (emailPattern.test(text)) {
+    detectedTypes.push('email');
+    warningMessage = '⚠️ Warning: Email detected. Consider not sharing your email on this site.';
+  }
+
+  // Phone number patterns (various formats)
+  const phonePatterns = [
+    /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g,  // US format: 123-456-7890
+    /\b\(\d{3}\)\s?\d{3}[-.]?\d{4}\b/g, // (123) 456-7890
+    /\b\d{10}\b/g,  // 10 digits
+    /\+\d{1,3}[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b/g // International
+  ];
+  if (phonePatterns.some(pattern => pattern.test(text))) {
+    detectedTypes.push('phone');
+    if (!warningMessage) {
+      warningMessage = '⚠️ Warning: Phone number detected. Be cautious sharing your phone number.';
+    }
+  }
+
+  // Credit card patterns (basic detection)
+  const cardPatterns = [
+    /\b\d{4}[-.\s]?\d{4}[-.\s]?\d{4}[-.\s]?\d{4}\b/g, // 16 digits
+    /\b\d{4}[-.\s]?\d{6}[-.\s]?\d{5}\b/g // Amex format
+  ];
+  if (cardPatterns.some(pattern => pattern.test(text.replace(/\s/g, '')))) {
+    detectedTypes.push('card');
+    if (!warningMessage) {
+      warningMessage = '⚠️ Warning: Credit card number detected. DO NOT enter card details on untrusted sites!';
+    }
+  }
+
+  // SSN pattern (US)
+  const ssnPattern = /\b\d{3}-?\d{2}-?\d{4}\b/g;
+  if (ssnPattern.test(text)) {
+    detectedTypes.push('ssn');
+    if (!warningMessage) {
+      warningMessage = '⚠️ Warning: SSN detected. Never share your SSN on untrusted websites!';
+    }
+  }
+
+  // Name detection (simple heuristic - 2+ capitalized words)
+  const namePattern = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b/g;
+  if (namePattern.test(text) && text.split(/\s+/).filter(w => /^[A-Z][a-z]+$/.test(w)).length >= 2) {
+    detectedTypes.push('name');
+    if (!warningMessage) {
+      warningMessage = '⚠️ Warning: Name detected. Consider using a pseudonym on untrusted sites.';
+    }
+  }
+
+  if (detectedTypes.length > 0) {
+    // Check risk score - only show warnings if risk score is 50 or higher
+    const currentRiskScore = lastRiskData?.risk_score;
+    
+    // Always show warnings for critical PII (credit cards, SSN) regardless of risk score
+    const isCriticalPII = detectedTypes.includes('card') || detectedTypes.includes('ssn');
+    
+    // Show warning only if:
+    // 1. Risk score is >= 50, OR
+    // 2. It's critical PII (card/SSN), OR
+    // 3. Risk score is not available yet (to be safe)
+    if (isCriticalPII || currentRiskScore === undefined || currentRiskScore === null || currentRiskScore >= 50) {
+      // Show warning to user
+      showWarning(element, warningMessage);
+      
+      // Notify background script
+      chrome.runtime.sendMessage({ action: 'piiDetected', types: detectedTypes });
+    } else {
+      // Risk score is low (< 50), don't show warning but still log detection
+      console.log(`PII detected but risk score (${currentRiskScore}) is low, warning suppressed`);
+    }
+    
+    // Also try to use AI detection if available (optional enhancement)
+    // Note: AI detection moved to background script to avoid permission prompts
+    chrome.runtime.sendMessage(
+      { action: 'detectPII', text: text.substring(0, 500) },
+      (response) => {
+        if (response && response.success && response.entities && response.entities.length > 0) {
+          console.log('AI detected PII:', response.entities);
+        }
+      }
+    );
+  }
+}
 
 console.log('Privacy Guardian content script loaded');
+

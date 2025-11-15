@@ -60,16 +60,24 @@ async function checkCurrentSiteRisk() {
     const url = tabs[0].url;
 
     try {
-      const response = await fetch("http://localhost:9000/check_website_risk", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url }),
-      });
-
-      const data = await response.json();
-      displayRisk(data);
+      // Use background script to make API call
+      chrome.runtime.sendMessage(
+        { action: 'checkWebsiteRisk', url: url },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error("Error communicating with background script:", chrome.runtime.lastError);
+            clearRiskDisplay();
+            return;
+          }
+          
+          if (response && response.success) {
+            displayRisk(response.data);
+          } else {
+            console.error("Error fetching website risk:", response?.error || "Unknown error");
+            clearRiskDisplay();
+          }
+        }
+      );
     } catch (error) {
       console.error("Error fetching website risk:", error);
       clearRiskDisplay();

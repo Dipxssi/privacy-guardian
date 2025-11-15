@@ -1,20 +1,41 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 import ssl, socket
 import re
+import logging
+import os
 from urllib.parse import urlparse
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# --- Insert your real API key here ---
-SAFE_BROWSING_API_KEY = "AIzaSyB1nTH11_R0hbruH4jyMz8zTwJwtdpvJqM"
+# Add CORS middleware to allow browser extension to make requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, specify exact origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Get API key from environment variable (for cloud deployment) or use default (for local)
+SAFE_BROWSING_API_KEY = os.getenv("SAFE_BROWSING_API_KEY", "AIzaSyB1nTH11_R0hbruH4jyMz8zTwJwtdpvJqM")
 SAFE_BROWSING_ENDPOINT = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
 
 class URLInput(BaseModel):
     url: str
 
 def check_url_safe_browsing(url: str) -> bool:
+    """Check URL against Google Safe Browsing API."""
+    if not SAFE_BROWSING_API_KEY or SAFE_BROWSING_API_KEY == "YOUR_API_KEY_HERE":
+        logger.warning("Google Safe Browsing API key not configured")
+        return True  # Default to safe if no API key
+    
     body = {
         "client": {
             "clientId": "privacy-guardian-demo",
@@ -34,26 +55,59 @@ def check_url_safe_browsing(url: str) -> bool:
     }
     params = {"key": SAFE_BROWSING_API_KEY}
     try:
-        resp = requests.post(SAFE_BROWSING_ENDPOINT, json=body, params=params)
+        resp = requests.post(SAFE_BROWSING_ENDPOINT, json=body, params=params, timeout=10)
         if resp.status_code == 200:
             data = resp.json()
-            return "matches" not in data or not data["matches"]
+            is_safe = "matches" not in data or not data["matches"]
+            if not is_safe:
+                logger.warning(f"Unsafe URL detected: {url}")
+            return is_safe
+        elif resp.status_code == 400:
+            logger.error(f"Invalid request to Safe Browsing API: {resp.text}")
+            return True  # Default to safe on API errors
+        elif resp.status_code == 403:
+            logger.error("Google Safe Browsing API key is invalid or quota exceeded")
+            return True  # Default to safe on auth errors
         else:
+            logger.warning(f"Safe Browsing API returned status {resp.status_code}: {resp.text}")
             return True
-    except Exception:
+    except requests.exceptions.Timeout:
+        logger.error("Safe Browsing API request timed out")
+        return True
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error calling Safe Browsing API: {e}")
+        return True
+    except Exception as e:
+        logger.error(f"Unexpected error in Safe Browsing check: {e}")
         return True
 
 def check_ssl_certificate(url: str) -> bool:
+    """Check if URL has a valid SSL certificate (only for HTTPS URLs)."""
     try:
-        hostname = urlparse(url).hostname
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
+        
         if not hostname:
             return False
+        
+        # Only check SSL for HTTPS URLs
+        if scheme != "https":
+            return scheme == "http"  # HTTP is valid but not secure
+        
         context = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=3) as sock:
+        with socket.create_connection((hostname, 443), timeout=5) as sock:
             with context.wrap_socket(sock, server_hostname=hostname) as ssock:
                 cert = ssock.getpeercert()
                 return True
-    except Exception:
+    except socket.timeout:
+        logger.warning(f"SSL certificate check timed out for {url}")
+        return False
+    except ssl.SSLError as e:
+        logger.warning(f"SSL certificate error for {url}: {e}")
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking SSL certificate for {url}: {e}")
         return False
 
 def check_url_heuristics(url: str) -> (int, list):
@@ -83,35 +137,71 @@ def check_url_heuristics(url: str) -> (int, list):
 
     return risk_score, reasons
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify the API is running."""
+    return {
+        "status": "healthy",
+        "api_key_configured": SAFE_BROWSING_API_KEY and SAFE_BROWSING_API_KEY != "YOUR_API_KEY_HERE"
+    }
+
 @app.post("/check_website_risk")
 async def check_website_risk(data: URLInput):
+    """Check website risk using Google Safe Browsing, SSL verification, and heuristics."""
     url = data.url
-    is_safe = check_url_safe_browsing(url)
-    has_ssl = check_ssl_certificate(url)
-    heuristic_score, heuristic_reasons = check_url_heuristics(url)
+    
+    # Validate URL format
+    if not url or not url.strip():
+        raise HTTPException(status_code=400, detail="URL is required")
+    
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            raise HTTPException(status_code=400, detail="Invalid URL format")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid URL: {str(e)}")
+    
+    logger.info(f"Checking risk for URL: {url}")
+    
+    try:
+        is_safe = check_url_safe_browsing(url)
+        has_ssl = check_ssl_certificate(url)
+        heuristic_score, heuristic_reasons = check_url_heuristics(url)
 
-    risk_score = 20
-    reasons = []
+        risk_score = 20
+        reasons = []
 
-    if not is_safe:
-        risk_score = 90
-        reasons.append("Unsafe according to Google Safe Browsing")
+        if not is_safe:
+            risk_score = 90
+            reasons.append("Unsafe according to Google Safe Browsing")
 
-    if not has_ssl:
-        risk_score = max(risk_score, 70)
-        reasons.append("No valid SSL certificate")
+        if not has_ssl:
+            risk_score = max(risk_score, 70)
+            reasons.append("No valid SSL certificate")
 
-    risk_score = max(risk_score, heuristic_score)
-    reasons.extend(heuristic_reasons)
+        risk_score = max(risk_score, heuristic_score)
+        reasons.extend(heuristic_reasons)
 
-    return {
-        "url": url,
-        "risk_score": risk_score,
-        "safe_browsing_safe": is_safe,
-        "ssl_valid": has_ssl,
-        "risk_reasons": reasons
-    }
+        result = {
+            "url": url,
+            "risk_score": risk_score,
+            "safe_browsing_safe": is_safe,
+            "ssl_valid": has_ssl,
+            "risk_reasons": reasons
+        }
+        
+        logger.info(f"Risk assessment complete for {url}: score={risk_score}")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error checking website risk: {e}")
+        raise HTTPException(status_code=500, detail=f"Error checking website risk: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    # Get port from environment variable (for cloud) or use default 9000 (for local)
+    port = int(os.getenv("PORT", 9000))
+    logger.info(f"Starting Website Risk API server on http://0.0.0.0:{port}")
+    logger.info(f"API documentation available at http://localhost:{port}/docs")
+    uvicorn.run(app, host="0.0.0.0", port=port)

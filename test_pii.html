@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PII Detection Test Form</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .form-container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .info {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196F3;
+        }
+        .info p {
+            margin: 5px 0;
+            color: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <div class="form-container">
+        <h1>🧪 Privacy Guardian Test Form</h1>
+        
+        <div class="info">
+            <p><strong>Instructions:</strong></p>
+            <p>1. Make sure the Privacy Guardian extension is loaded and active</p>
+            <p>2. Type different types of PII in the fields below</p>
+            <p>3. Watch for warning banners that appear below the input fields</p>
+            <p>4. Check the extension popup to see the risk score for this page</p>
+        </div>
+
+        <form>
+            <div class="form-group">
+                <label for="email">Email Address:</label>
+                <input type="text" id="email" name="email" placeholder="test@example.com">
+                <small style="color: #666;">Try: john.doe@company.com</small>
+            </div>
+
+            <div class="form-group">
+                <label for="phone">Phone Number:</label>
+                <input type="text" id="phone" name="phone" placeholder="123-456-7890">
+                <small style="color: #666;">Try: (555) 123-4567 or 1234567890</small>
+            </div>
+
+            <div class="form-group">
+                <label for="card">Credit Card Number:</label>
+                <input type="text" id="card" name="card" placeholder="1234 5678 9012 3456">
+                <small style="color: #666;">Try: 4532 1234 5678 9010 (Warning should ALWAYS appear)</small>
+            </div>
+
+            <div class="form-group">
+                <label for="ssn">Social Security Number (SSN):</label>
+                <input type="text" id="ssn" name="ssn" placeholder="123-45-6789">
+                <small style="color: #666;">Try: 123-45-6789 (Warning should ALWAYS appear)</small>
+            </div>
+
+            <div class="form-group">
+                <label for="name">Full Name:</label>
+                <input type="text" id="name" name="name" placeholder="John Smith">
+                <small style="color: #666;">Try: John Michael Smith</small>
+            </div>
+
+            <div class="form-group">
+                <label for="address">Address (Test Textarea):</label>
+                <textarea id="address" name="address" placeholder="123 Main St, City, State 12345"></textarea>
+                <small style="color: #666;">Try typing an email or phone in this textarea</small>
+            </div>
+
+            <div class="form-group">
+                <label for="notes">Notes (Multiple PII Test):</label>
+                <textarea id="notes" name="notes" placeholder="My email is test@example.com and my phone is 555-1234"></textarea>
+                <small style="color: #666;">Try typing multiple types of PII in one field</small>
+            </div>
+        </form>
+
+        <div class="info" style="margin-top: 30px;">
+            <p><strong>Expected Behavior:</strong></p>
+            <p>• <strong>High Risk Sites (score ≥ 50):</strong> All PII types show warnings</p>
+            <p>• <strong>Low Risk Sites (score < 50):</strong> Only credit cards and SSN show warnings</p>
+            <p>• <strong>Critical PII:</strong> Credit cards and SSN always show warnings regardless of risk score</p>
+        </div>
+    </div>
+</body>
+</html>
+
