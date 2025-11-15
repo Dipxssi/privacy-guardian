@@ -9,4 +9,3 @@ services:
         sync: false  # Set this in Render dashboard
       - key: PORT
         value: 10000
-

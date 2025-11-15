@@ -56,8 +56,23 @@ function updateUI() {
 
 async function checkCurrentSiteRisk() {
   chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-    if (!tabs[0]) return;
+    if (!tabs[0]) {
+      displayError("No active tab found");
+      return;
+    }
+    
     const url = tabs[0].url;
+    
+    // Skip risk check for browser internal pages
+    if (url.startsWith('chrome://') || url.startsWith('edge://') || url.startsWith('about:')) {
+      displayError("Cannot check risk for browser pages");
+      return;
+    }
+
+    // Show loading state
+    const riskScoreEl = document.getElementById('riskScore');
+    riskScoreEl.textContent = "Loading risk...";
+    riskScoreEl.style.color = "#94a3b8";
 
     try {
       // Use background script to make API call
@@ -66,21 +81,28 @@ async function checkCurrentSiteRisk() {
         (response) => {
           if (chrome.runtime.lastError) {
             console.error("Error communicating with background script:", chrome.runtime.lastError);
-            clearRiskDisplay();
+            displayError("Extension error: " + chrome.runtime.lastError.message);
             return;
           }
           
           if (response && response.success) {
             displayRisk(response.data);
           } else {
-            console.error("Error fetching website risk:", response?.error || "Unknown error");
-            clearRiskDisplay();
+            const errorMsg = response?.error || "Unknown error";
+            console.error("Error fetching website risk:", errorMsg);
+            
+            // Check if it's a timeout or connection error (Render spin-down)
+            if (errorMsg.includes("aborted") || errorMsg.includes("timeout") || errorMsg.includes("Failed to fetch")) {
+              displayError("API is starting up (may take 30-60s). Please wait and try again.");
+            } else {
+              displayError("API error: " + errorMsg);
+            }
           }
         }
       );
     } catch (error) {
       console.error("Error fetching website risk:", error);
-      clearRiskDisplay();
+      displayError("Failed to check risk: " + error.message);
     }
   });
 }
@@ -107,6 +129,16 @@ function displayRisk(data) {
     riskScoreEl.style.color = "green";
     riskReasonsEl.style.color = "green";
   }
+}
+
+function displayError(message) {
+  const riskScoreEl = document.getElementById('riskScore');
+  const riskReasonsEl = document.getElementById('riskReasons');
+
+  riskScoreEl.textContent = "Error: " + message;
+  riskScoreEl.style.color = "orange";
+  riskReasonsEl.textContent = "Check console (F12) for details";
+  riskReasonsEl.style.color = "#94a3b8";
 }
 
 function clearRiskDisplay() {

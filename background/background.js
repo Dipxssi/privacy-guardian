@@ -62,25 +62,42 @@ async function checkWebsiteRisk(url) {
   const apiUrl = await getApiUrl();
   const endpoint = `${apiUrl}/check_website_risk`;
   
+  console.log(`[Privacy Guardian] Checking risk for: ${url}`);
+  console.log(`[Privacy Guardian] Using API: ${apiUrl}`);
+  
   try {
+    // Add timeout for cloud API (Render free tier can be slow)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ url }),
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
+
+    console.log(`[Privacy Guardian] API response status: ${response.status}`);
 
     if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error(`[Privacy Guardian] API error ${response.status}: ${errorText}`);
+      throw new Error(`API error: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
+    console.log(`[Privacy Guardian] Risk score: ${data.risk_score}`);
     return data;
   } catch (error) {
+    console.error(`[Privacy Guardian] Fetch error:`, error);
+    
     // If cloud API fails and we're using cloud, try localhost as fallback
     if (apiUrl !== LOCAL_API_URL && apiUrl.includes('http')) {
-      console.log("Cloud API failed, trying localhost fallback...");
+      console.log("[Privacy Guardian] Cloud API failed, trying localhost fallback...");
       try {
         const localResponse = await fetch(`${LOCAL_API_URL}/check_website_risk`, {
           method: "POST",
@@ -91,14 +108,15 @@ async function checkWebsiteRisk(url) {
         });
         
         if (localResponse.ok) {
-          return await localResponse.json();
+          const localData = await localResponse.json();
+          console.log("[Privacy Guardian] Localhost fallback succeeded");
+          return localData;
         }
       } catch (localError) {
-        console.log("Localhost fallback also failed");
+        console.error("[Privacy Guardian] Localhost fallback also failed:", localError);
       }
     }
     
-    console.error("Failed to fetch risk info:", error);
     throw error;
   }
 }

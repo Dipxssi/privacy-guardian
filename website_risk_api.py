@@ -6,13 +6,22 @@ import ssl, socket
 import re
 import logging
 import os
+from datetime import datetime
 from urllib.parse import urlparse
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# Log startup
+logger.info("=" * 50)
+logger.info("Privacy Guardian API Starting...")
+logger.info("=" * 50)
+
+app = FastAPI(title="Privacy Guardian API", version="1.0.0")
 
 # Add CORS middleware to allow browser extension to make requests
 app.add_middleware(
@@ -137,13 +146,33 @@ def check_url_heuristics(url: str) -> (int, list):
 
     return risk_score, reasons
 
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "message": "Privacy Guardian API",
+        "status": "running",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint to verify the API is running."""
-    return {
-        "status": "healthy",
-        "api_key_configured": SAFE_BROWSING_API_KEY and SAFE_BROWSING_API_KEY != "YOUR_API_KEY_HERE"
-    }
+    try:
+        api_key_configured = SAFE_BROWSING_API_KEY and SAFE_BROWSING_API_KEY != "YOUR_API_KEY_HERE" and len(SAFE_BROWSING_API_KEY) > 10
+        return {
+            "status": "healthy",
+            "api_key_configured": api_key_configured,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Health check error: {e}")
+        return {
+            "status": "error",
+            "error": str(e)
+        }
 
 @app.post("/check_website_risk")
 async def check_website_risk(data: URLInput):
