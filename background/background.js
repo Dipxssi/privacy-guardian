@@ -42,7 +42,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // API Configuration - Supports both cloud and local
 // Set your cloud API URL here, or leave empty to use localhost
-const CLOUD_API_URL = ""; // e.g., "https://privacy-guardian-api.onrender.com"
+const CLOUD_API_URL = "https://privacy-guardian-api.onrender.com";
 const LOCAL_API_URL = "http://localhost:9000";
 
 // Function to get API URL (cloud first, then local fallback)
