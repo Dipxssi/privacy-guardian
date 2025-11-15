@@ -32,6 +32,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Log when the application starts."""
+    logger.info("=" * 50)
+    logger.info("Privacy Guardian API Started Successfully!")
+    logger.info(f"API Key configured: {bool(SAFE_BROWSING_API_KEY and len(SAFE_BROWSING_API_KEY) > 10)}")
+    logger.info("=" * 50)
+
 # Get API key from environment variable (for cloud deployment) or use default (for local)
 SAFE_BROWSING_API_KEY = os.getenv("SAFE_BROWSING_API_KEY", "AIzaSyB1nTH11_R0hbruH4jyMz8zTwJwtdpvJqM")
 SAFE_BROWSING_ENDPOINT = "https://safebrowsing.googleapis.com/v4/threatMatches:find"
@@ -147,8 +155,9 @@ def check_url_heuristics(url: str) -> (int, list):
     return risk_score, reasons
 
 @app.get("/")
+@app.head("/")
 async def root():
-    """Root endpoint."""
+    """Root endpoint - handles both GET and HEAD requests for Render health checks."""
     return {
         "message": "Privacy Guardian API",
         "status": "running",
@@ -158,6 +167,7 @@ async def root():
     }
 
 @app.get("/health")
+@app.head("/health")
 async def health_check():
     """Health check endpoint to verify the API is running."""
     try:
