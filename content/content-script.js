@@ -3,7 +3,17 @@ let isActive = true;
 // Sync protection state from storage
 chrome.storage.local.get(['isActive'], (result) => {
   isActive = result.isActive !== false;
-  if (isActive) checkRiskForCurrentPage();
+  if (isActive) {
+    // Check risk when page loads
+    checkRiskForCurrentPage();
+    // Also check again after a short delay to ensure API is ready
+    setTimeout(() => {
+      if (lastRiskData === null) {
+        console.log("Retrying risk check after delay...");
+        checkRiskForCurrentPage();
+      }
+    }, 2000);
+  }
 });
 
 // Listen for toggle messages from popup
@@ -213,18 +223,27 @@ async function checkForPII(text, element) {
     // Always show warnings for critical PII (credit cards, SSN) regardless of risk score
     const isCriticalPII = detectedTypes.includes('card') || detectedTypes.includes('ssn');
     
-    // Show warning only if:
-    // 1. Risk score is >= 50, OR
-    // 2. It's critical PII (card/SSN), OR
-    // 3. Risk score is not available yet (to be safe)
-    if (isCriticalPII || currentRiskScore === undefined || currentRiskScore === null || currentRiskScore >= 50) {
+    // Check if risk data has been loaded (even if score is 0, it means we checked)
+    const riskDataLoaded = lastRiskData !== null && lastRiskData !== undefined;
+    
+    // Show warning if:
+    // 1. It's critical PII (card/SSN) - always warn, OR
+    // 2. Risk score is >= 50, OR
+    // 3. Risk data hasn't loaded yet (to be safe - show warning by default)
+    if (isCriticalPII || !riskDataLoaded || currentRiskScore >= 50) {
       // Show warning to user
       showWarning(element, warningMessage);
       
       // Notify background script
       chrome.runtime.sendMessage({ action: 'piiDetected', types: detectedTypes });
+      
+      // If risk data not loaded, try to load it now
+      if (!riskDataLoaded) {
+        console.log("Risk data not loaded yet, fetching now...");
+        checkRiskForCurrentPage();
+      }
     } else {
-      // Risk score is low (< 50), don't show warning but still log detection
+      // Risk score is low (< 50) and data is loaded, don't show warning
       console.log(`PII detected but risk score (${currentRiskScore}) is low, warning suppressed`);
     }
     

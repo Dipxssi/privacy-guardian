@@ -20,6 +20,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
   }
   
+  // Provide privacy signals (AI/bot policy + cookie advice)
+  if (message.action === 'getPrivacySignals') {
+    const proceed = async () => {
+      try {
+        let pageUrl = message.url;
+        if (!pageUrl && message.tabId) {
+          const tab = await chrome.tabs.get(message.tabId);
+          pageUrl = tab?.url || '';
+        }
+        if (!pageUrl) throw new Error('No page URL available');
+        const data = await getPrivacySignals(pageUrl);
+        sendResponse({ success: true, data });
+      } catch (error) {
+        console.warn('[Privacy Guardian] getPrivacySignals error:', error?.message || error);
+        sendResponse({ success: false, error: error?.message || String(error) });
+      }
+    };
+    proceed();
+    return true;
+  }
+  
   // Handle risk check requests from content script or popup
   if (message.action === 'checkWebsiteRisk') {
     checkWebsiteRisk(message.url)
@@ -55,6 +76,169 @@ async function getApiUrl() {
   
   // Use cloud URL if configured, otherwise localhost
   return CLOUD_API_URL || LOCAL_API_URL;
+}
+
+// --- Privacy Signals: robots.txt policy + cookie advice ---
+
+async function getPrivacySignals(pageUrl) {
+  const url = new URL(pageUrl);
+  const origin = `${url.protocol}//${url.host}`;
+
+  const [robots, cookies] = await Promise.all([
+    analyzeRobotsTxt(origin),
+    summarizeCookies(pageUrl)
+  ]);
+
+  const advice = buildCookieAdvice(cookies);
+
+  console.log('[Privacy Guardian] Privacy signals for', pageUrl, {
+    cookiesTotal: cookies?.total,
+    cookiesByType: cookies?.byType,
+    robotsNote: robots?.note
+  });
+
+  return {
+    robotsPolicy: robots,
+    cookieSummary: cookies,
+    cookieAdvice: advice
+  };
+}
+
+async function analyzeRobotsTxt(origin) {
+  try {
+    const res = await fetch(`${origin}/robots.txt`, { method: 'GET' });
+    if (!res.ok) throw new Error(`robots.txt status ${res.status}`);
+    const text = await res.text();
+
+    const aiAgents = ['GPTBot', 'ChatGPT-User', 'CCBot', 'Claude-Web', 'PerplexityBot', 'Google-Extended'];
+    const lines = text.split(/\r?\n/);
+
+    const policies = {};
+    let currentAgent = null;
+
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const [kRaw, vRaw] = t.split(':', 2);
+      if (!kRaw || !vRaw) continue;
+      const key = kRaw.trim().toLowerCase();
+      const val = vRaw.trim();
+
+      if (key === 'user-agent') {
+        currentAgent = val;
+        if (!policies[currentAgent]) policies[currentAgent] = { disallow: [], allow: [] };
+      } else if (key === 'disallow' && currentAgent) {
+        policies[currentAgent].disallow.push(val);
+      } else if (key === 'allow' && currentAgent) {
+        policies[currentAgent].allow.push(val);
+      }
+    }
+
+    const aiFindings = aiAgents.map(a => {
+      const p = policies[a] || policies['*'] || { disallow: [], allow: [] };
+      const isDisallowedAll = p.disallow.includes('/') || (p.disallow.length > 0 && !p.allow.length);
+      return { agent: a, disallowed: isDisallowedAll, policy: p };
+    });
+
+    const blockedAgents = aiFindings.filter(f => f.disallowed).map(f => f.agent);
+    const allowedAgents = aiFindings.filter(f => !f.disallowed).map(f => f.agent);
+
+    return {
+      origin,
+      hasRobots: true,
+      blockedAgents,
+      allowedAgents,
+      note: blockedAgents.length
+        ? 'Site signals it does not want AI crawlers to train on its pages.'
+        : 'Site does not block common AI crawlers in robots.txt (public pages may be scraped).'
+    };
+  } catch (e) {
+    return {
+      origin,
+      hasRobots: false,
+      blockedAgents: [],
+      allowedAgents: [],
+      note: 'robots.txt unavailable; cannot infer AI crawler policy.'
+    };
+  }
+}
+
+async function summarizeCookies(pageUrl) {
+  return new Promise((resolve) => {
+    // Using URL filter ensures Chrome returns cookies that apply to this exact page,
+    // regardless of leading dots or subdomain scoping.
+    chrome.cookies.getAll({ url: pageUrl }, (cookies) => {
+      const summarize = (c) => {
+        const name = c.name.toLowerCase();
+        if (/(session|sid|csrftoken|xsrf|auth|secure)/.test(name)) return 'essential';
+        if (/^_ga|^_gid|analytics|amplitude|segment|mixpanel|heap/.test(name)) return 'analytics';
+        if (/_fbp|_fbc|fr|_uet|_clck|_clsk|gclid|fbclid|ad|doubleclick|_gcl/.test(name)) return 'advertising';
+        if (/pref|locale|theme|consent|cookieconsent/.test(name)) return 'preferences';
+        return 'unknown';
+      };
+
+      const buckets = { essential: [], analytics: [], advertising: [], preferences: [], unknown: [] };
+      (cookies || []).forEach(c => buckets[summarize(c)].push(c.name));
+
+      resolve({
+        total: (cookies || []).length,
+        byType: {
+          essential: buckets.essential.length,
+          analytics: buckets.analytics.length,
+          advertising: buckets.advertising.length,
+          preferences: buckets.preferences.length,
+          unknown: buckets.unknown.length
+        },
+        examples: {
+          essential: buckets.essential.slice(0, 5),
+          analytics: buckets.analytics.slice(0, 5),
+          advertising: buckets.advertising.slice(0, 5),
+          preferences: buckets.preferences.slice(0, 5),
+          unknown: buckets.unknown.slice(0, 5)
+        }
+      });
+    });
+  });
+}
+
+function buildCookieAdvice(summary) {
+  if (!summary) {
+    return {
+      decision: 'Undetermined',
+      explanation: 'Could not inspect cookies for this site.',
+      layman: cookieLaymanText('undetermined')
+    };
+  }
+
+  const nonEssentialCount = (summary.byType.analytics || 0) + (summary.byType.advertising || 0);
+  if (nonEssentialCount === 0) {
+    return {
+      decision: 'Safe to accept essentials',
+      explanation: 'Only essential or preference cookies detected.',
+      layman: cookieLaymanText('essentials')
+    };
+  }
+
+  return {
+    decision: 'Reject non‑essential',
+    explanation: 'Analytics/advertising cookies detected; accept only essential if prompted.',
+    layman: cookieLaymanText('reject')
+  };
+}
+
+function cookieLaymanText(mode) {
+  const whatAreCookies =
+    'Cookies are small files a site stores in your browser to keep you logged in, remember preferences, or measure visits.';
+  const security =
+    'Security risks: tracking across sites, profiling for ads, and exposure if a site is compromised. Essential cookies are usually needed for sign‑in and carts.';
+
+  if (mode === 'essentials') {
+    return `${whatAreCookies} Recommendation: Accept only essential cookies. ${security}`;
+  }
+  if (mode === 'reject') {
+    return `${whatAreCookies} Recommendation: Reject non‑essential cookies (accept only required). ${security}`;
+  }
+  return `${whatAreCookies} If unsure, choose “Reject non‑essential” or “Only necessary.” ${security}`;
 }
 
 // Function to check website risk via API

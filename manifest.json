@@ -3,7 +3,7 @@
   "name": "Privacy Guardian",
   "version": "1.0",
   "description": "AI-Powered Privacy Protection",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting", "cookies", "tabs"],
   "host_permissions": [
     "http://localhost:9000/*",
     "http://localhost:8000/*",

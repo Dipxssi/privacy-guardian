@@ -10,6 +10,8 @@ chrome.storage.local.get(['isActive', 'detectionCount', 'blockedCount'], (result
 
   if (isActive) {
     checkCurrentSiteRisk();
+    // Also load privacy signals on initial open
+    loadPrivacySignals();
   }
 });
 
@@ -31,6 +33,9 @@ document.getElementById('toggleBtn').addEventListener('click', () => {
   } else {
     clearRiskDisplay();
   }
+
+  // Also load privacy signals for cookie advice and AI policy
+  loadPrivacySignals();
 });
 
 // Settings button
@@ -104,6 +109,67 @@ async function checkCurrentSiteRisk() {
       console.error("Error fetching website risk:", error);
       displayError("Failed to check risk: " + error.message);
     }
+  });
+}
+
+function loadPrivacySignals() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (!tabs[0]) return;
+    const url = tabs[0].url || '';
+    if (url.startsWith('chrome://') || url.startsWith('edge://') || url.startsWith('about:')) return;
+
+    // Set placeholders so the user always sees something
+    const decision = document.getElementById('cookieDecision');
+    const layman = document.getElementById('cookieLayman');
+    const breakdown = document.getElementById('cookieBreakdown');
+    const aiNote = document.getElementById('aiNote');
+    const aiDetails = document.getElementById('aiDetails');
+
+    if (decision) decision.textContent = 'Loading cookie advice...';
+    if (layman) layman.textContent = '';
+    if (breakdown) breakdown.textContent = '';
+    if (aiNote) aiNote.textContent = 'Loading AI/scraper signals...';
+    if (aiDetails) aiDetails.textContent = '';
+
+    console.log('Requesting privacy signals for', url);
+    let responded = false;
+    const failTimer = setTimeout(() => {
+      if (responded) return;
+      if (decision) decision.textContent = 'Undetermined';
+      if (layman) layman.textContent = 'Timed out fetching cookie info.';
+      if (aiNote) aiNote.textContent = 'robots.txt check timed out.';
+    }, 4000);
+
+    chrome.runtime.sendMessage({ action: 'getPrivacySignals', url, tabId: tabs[0].id }, (response) => {
+      responded = true;
+      clearTimeout(failTimer);
+      if (!response || !response.success) {
+        if (decision) decision.textContent = 'Undetermined';
+        if (layman) layman.textContent = 'Could not fetch cookie info for this site.';
+        if (aiNote) aiNote.textContent = 'robots.txt unavailable; cannot infer AI crawler policy.';
+        if (response && response.error) {
+          console.warn('Privacy signals error:', response.error);
+        }
+        return;
+      }
+      const { robotsPolicy, cookieSummary, cookieAdvice } = response.data || {};
+
+      console.log('Privacy signals response', { robotsPolicy, cookieSummary, cookieAdvice });
+
+      // Cookie advice
+      if (decision) decision.textContent = cookieAdvice?.decision || 'Undetermined';
+      if (layman) layman.textContent = cookieAdvice?.layman || 'Could not fetch cookie info for this site.';
+      if (breakdown && cookieSummary?.byType) {
+        const b = cookieSummary.byType;
+        breakdown.textContent = `Cookies detected: ${cookieSummary.total} (essential ${b.essential || 0}, analytics ${b.analytics || 0}, advertising ${b.advertising || 0}, preferences ${b.preferences || 0})`;
+      }
+
+      // AI/Scraper signals
+      if (aiNote) aiNote.textContent = robotsPolicy?.note || 'robots.txt unavailable; cannot infer AI crawler policy.';
+      if (aiDetails && robotsPolicy) {
+        aiDetails.textContent = `robots.txt: blocked [${(robotsPolicy.blockedAgents || []).join(', ') || 'none'}], allowed [${(robotsPolicy.allowedAgents || []).join(', ') || 'unknown'}]`;
+      }
+    });
   });
 }
 

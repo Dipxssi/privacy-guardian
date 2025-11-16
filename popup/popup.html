@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <link rel="stylesheet" href="popup.css">
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -34,6 +33,19 @@
       <h3>Website Risk Assessment</h3>
       <div id="riskScore" style="font-weight:bold; font-size:16px; margin-bottom:8px;">Loading risk...</div>
       <div id="riskReasons" style="font-size:14px; color:#555;"></div>
+    </div>
+
+    <div class="risk-info" style="margin-top:12px;">
+      <h3>Cookie Advice</h3>
+      <div id="cookieDecision" style="font-weight:bold; font-size:14px; margin-bottom:6px;"></div>
+      <div id="cookieLayman" style="font-size:13px; color:#555;"></div>
+      <div id="cookieBreakdown" style="font-size:12px; color:#64748b; margin-top:6px;"></div>
+    </div>
+
+    <div class="risk-info" style="margin-top:12px;">
+      <h3>AI/Scraper Signals</h3>
+      <div id="aiNote" style="font-size:13px; color:#555;"></div>
+      <div id="aiDetails" style="font-size:12px; color:#64748b; margin-top:6px;"></div>
     </div>
 
     <div class="controls">
